@@ -1,148 +1,177 @@
-# Laboratorio 4
-## Taller de Diseño Digital – EL3313
+# VGA Digital Clock — FPGA Nexys A7
 
-**Estudiantes:**
-- Navarro Acuña Mauro
+**Curso:** EL3313 — Taller de Diseño Digital  
+**Semestre:** I Semestre 2026  
+**Profesor:** Luis G. León-Vega, Ph.D  
+**Repositorio:** https://github.com/mauroac2003-pixel/vga-digital-clock-fpga
+
+---
+
+## Descripción
+
+Sistema digital implementado en FPGA (Nexys A7-100T) que visualiza un reloj digital en una pantalla VGA a resolución 640×480 @ 60 Hz. El sistema muestra la hora en formato `HH:MM:SS` sobre una imagen de fondo personalizada y permite ajustar la hora mediante switches y botones de la tarjeta.
+
+El diseño está implementado en Verilog HDL con arquitectura modular jerárquica y sigue buenas prácticas de diseño digital adoptadas en academia e industria.
+
+---
+
+## Diagrama de bloques
+
+```
+                        NEXYS A7 — top_reloj
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│  clk (100MHz) ──┬──► clk_25MHz ──► clk_25_en ──► vga_sync         │
+│                 │                                    │              │
+│                 └──► clock_divider ──► clk_1hz       │hcount/vcount│
+│                                          │            │             │
+│  rst_sw ──► debouncer ──► rst_clean      │            ▼             │
+│  btn_up ──► debouncer ──► btn_up_clean   │         ┌──────┐        │
+│  btn_down ► debouncer ──► btn_down_clean │         │ VRAM │──────► RGB
+│                                          │         │(BRAM)│  pixel │
+│  sw[1:0] ──────────────────────────────►│         └──────┘  color │
+│                                          ▼            ▲             │
+│                                  control_hora_manual  │             │
+│                                    │  hh / mm / ss    │             │
+│                                    └──────────────►img_gen          │
+│                                                   (escribe VRAM)    │
+│                                    │                                │
+│                                    └──► display_7seg ──► seg / an   │
+│                                                                     │
+│  blink (~2Hz) ─────────────────────────►img_gen / display_7seg     │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+Salidas VGA:  hsync, vsync, vga_r[3:0], vga_g[3:0], vga_b[3:0]
+Salidas 7seg: seg[6:0], an[7:0]
+```
+
+---
+
+## Módulos del sistema
+
+| Módulo | Archivo | Descripción |
+|--------|---------|-------------|
+| `top_reloj` | `rtl/top_reloj.v` | Módulo top — integra todos los subsistemas |
+| `vga_sync` | `rtl/vga_sync.v` | Generador de sincronización VGA 640×480@60Hz |
+| `vram` | `rtl/BRAM.v` | Memoria de video BRAM doble puerto (307200 píxeles × 12 bits) |
+| `img_gen` | `rtl/img_gen.v` | Generador de imagen — escribe fondo y dígitos en VRAM |
+| `font_rom` | `rtl/font_rom.v` | ROM de caracteres (dígitos 0-9 y ':') en formato 8×16 |
+| `clock_divider` | `rtl/clock_divider.v` | Divisor de 100 MHz a 1 Hz |
+| `clk_25MHz` | `rtl/clk_25MHz.v` | Generador de enable de 25 MHz para VGA |
+| `control_hora_manual` | `rtl/control_hora_manual.v` | Contador de tiempo con modo edición manual |
+| `debouncer` | `rtl/debouncer.v` | Módulo antirrebote para botones y reset |
+| `display_7seg` | `rtl/display_7seg.v` | Controlador de display 7 segmentos multiplexado (debug) |
+
+---
+
+## Estructura del repositorio
+
+```
+vga-digital-clock-fpga/
+├── rtl/                        # Código HDL sintetizable
+│   ├── top_reloj.v             # Módulo top
+│   ├── vga_sync.v              # Controlador VGA
+│   ├── BRAM.v                  # Memoria de video (VRAM)
+│   ├── img_gen.v               # Generador de imagen
+│   ├── font_rom.v              # ROM de caracteres
+│   ├── clock_divider.v         # Divisor 100MHz → 1Hz
+│   ├── clk_25MHz.v             # Enable 25MHz para VGA
+│   ├── control_hora_manual.v   # Control de hora
+│   ├── debouncer.v             # Antirrebote
+│   ├── display_7seg.v          # Display 7 segmentos
+│   └── fondo_profe.coe         # Imagen de fondo (formato hex)
+├── sim/                        # Simulación y testbenches
+│   ├── tb_vga_sync.v
+│   ├── tb_vram.v
+│   ├── tb_img_gen.v
+│   ├── tb_font_rom.v
+│   ├── tb_clock_divider.v
+│   ├── tb_clk_25MHz.v
+│   ├── tb_control_hora_manual.v
+│   ├── tb_debouncer.v
+│   ├── tb_display_7seg.v
+│   ├── tb_top_reloj.v
+│   └── run_tests.sh            # Script de automatización de pruebas
+├── constraints/
+│   └── artix7.xdc              # Constraints para Nexys A7-100T
+├── .gitignore
+└── README.md
+```
+
+---
+
+## Uso de la tarjeta
+
+| Entrada | Descripción |
+|---------|-------------|
+| `SW0` | Reset del sistema |
+| `SW1` | Modo edición: `00`=automático, `01`=editar segundos |
+| `SW2` | Modo edición: `10`=editar minutos, `11`=editar horas |
+| `BTNU` | Incrementar valor en modo edición |
+| `BTND` | Decrementar valor en modo edición |
+
+---
+
+## Dependencias y herramientas
+
+- **Vivado Design Suite** 2024.x — síntesis e implementación
+- **Icarus Verilog (iverilog)** — simulación de testbenches
+- **Tarjeta FPGA:** Nexys A7-100T (Artix-7 XC7A100T)
+- **Monitor VGA** con resolución mínima 640×480
+
+---
+
+## Simulación de testbenches
+
+### Requisitos
+
+```bash
+sudo apt install iverilog
+```
+
+### Ejecutar todas las pruebas
+
+```bash
+cd sim/
+chmod +x run_tests.sh
+./run_tests.sh
+```
+
+### Ejecutar un testbench individual
+
+```bash
+cd sim/
+iverilog -o out/tb_vga_sync.out ../rtl/vga_sync.v tb_vga_sync.v
+vvp out/tb_vga_sync.out
+```
+
+---
+
+## Flujo GitFlow
+
+```
+feature/vga_digital_clock ──┐
+                             ├──► develop ──► main (v1.0.0)
+feature/testbenches ─────────┤
+feature/vga_functional ──────┘
+```
+
+- `main` — versión estable de producción (entrega final, tag `v1.0.0`)
+- `develop` — integración del desarrollo
+- `feature/*` — desarrollo de funcionalidades individuales
+
+---
+
+## Integrantes
+
 - Arce Cruz Josué
+- Navarro Acuña Mauro Agustín
 - Arguedas Guzmán Gabriel
 
-**Profesor:**
-Luis G. León-Vega Ph.D
-
-Instituto Tecnológico de Costa Rica
-I Semestre 2026
-
 ---
 
-## Actividad 1: Arquitectura Uniciclo
+## Licencia
 
-**2. Latencia de la arquitectura uniciclo**
-
-La arquitectura uniciclo es completamente combinacional, por lo tanto no requiere ciclos de reloj para producir el resultado. La latencia es de 0 ciclos de reloj: el resultado en `dot` aparece inmediatamente tras aplicar las entradas, con un retraso correspondiente únicamente a la propagación de señales a través de los multiplicadores y sumadores.
-
-## Diagrama de tiempos
-<img width="1069" height="430" alt="wave_uniciclo" src="https://github.com/user-attachments/assets/a8dfcfb9-f408-496f-81d7-e4787cd8ff4d" />
-
-
-## Diagrama RTL 
-<img width="968" height="427" alt="uniciclo_RTL" src="https://github.com/user-attachments/assets/baca909b-602b-4f49-b813-c058efe9a14c" />
-
-
-## Report Power
-<img width="667" height="425" alt="uniciclo_power" src="https://github.com/user-attachments/assets/1bc47bd9-bc5b-4c80-9cbc-88e519ab8e50" />
-
-
-## Timing
-<img width="862" height="247" alt="uniciclo_Timing" src="https://github.com/user-attachments/assets/7fba06df-f766-4be1-892d-079bc2633f6b" />
-
-** Frecuencia maxima **
-
-  Para el uniciclo hay un detalle importante y es un circuito puramente combinacional, por tanto no tiene reloj. 
-  
----
-
-## Actividad 2: Arquitectura Segmentada
-
-**2. Latencia de la arquitectura segmentada**
-
-La arquitectura segmentada introduce 3 etapas de pipeline mediante registros síncronos. Por lo tanto, la latencia es de 3 ciclos de reloj desde que se aplican las entradas hasta que el resultado correcto aparece en `dot`. Esto se verificó en la simulación observando que el valor correcto aparece en el tercer flanco de subida del reloj después de establecer las entradas.
-
-
-## Diagrama de tiempos
-<img width="1055" height="456" alt="wave_segmentada" src="https://github.com/user-attachments/assets/55ef0fea-0a68-4baa-bba1-6d4c906d7eba" />
-
-
-
-## Diagrama RTL 
-<img width="984" height="422" alt="segmentada_RTL" src="https://github.com/user-attachments/assets/13827e21-0a54-40b3-9afc-4cc2d4293cc0" />
-
-
-## Report Power
-<img width="677" height="377" alt="segmentada_power" src="https://github.com/user-attachments/assets/8388ff2d-e936-45da-97ec-697ae0d14a8a" />
-
-
-## Timing
-<img width="869" height="204" alt="segmentada_timing" src="https://github.com/user-attachments/assets/7ac93cd0-5ace-48b2-9213-174daa8442b6" />
-
-** Frecuencia maxima **
-
-La arquitectura segmentada opera a una frecuencia máxima de ≈ 123.5 MHz
-
-
----
-
-## Actividad 3: Arquitectura Multiciclo
-
-**2. Latencia de la arquitectura multiciclo**
-
-La arquitectura multiciclo procesa un elemento del vector por ciclo de reloj. Para n=8 elementos, la latencia es de 8 ciclos de reloj desde que se activa `start=1` hasta que `done=1` y el resultado está disponible en `dot`. Esto se verificó en la simulación contando los flancos de reloj entre la activación de `start` y la señal `done`.
-
-
-## Diagrama de tiempos
-<img width="1054" height="471" alt="wave_multiciclo" src="https://github.com/user-attachments/assets/e9c3abc4-a757-46fc-af8f-5bbfaece4339" />
-
-
-## Diagrama RTL 
-<img width="1059" height="490" alt="multiciclo_RTL" src="https://github.com/user-attachments/assets/15fa05d8-237f-4696-b26a-e6c3537b9787" />
-
-
-## Report Power
-<img width="729" height="445" alt="multiciclo_power" src="https://github.com/user-attachments/assets/faa1d1a2-dcf3-4104-a36e-50cf6560aa2f" />
-
-
-## Timing
-<img width="854" height="207" alt="multiciclo_timing" src="https://github.com/user-attachments/assets/a103d59f-cb1f-4c29-a31b-c837d1214d91" />
-
-** Frecuencia maxima **
-
-La arquitectura multiciclo opera a una frecuencia máxima de ≈ 108.4 MHz
-
----
-
-## Actividad 4: Preguntas de Seguimiento del Aprendizaje
-
-**1. Tabla resumen de microarquitecturas**
-
-| Reporte | Uniciclo | Multiciclo | Segmentado |
-|---|---|---|---|
-| Consumo CLBs (%) |1|1|1|
-| Consumo DSPs (%) |0|0|0|
-| Retraso crítico |2.682 ns|9.226 ns|8.096 ns|
-| Frecuencia máxima |372.9 MHz|108.4 MHz|123.5 MHz|
-
-
----
-
-**2. ¿Por qué las distintas microarquitecturas consumen menos o más recursos?**
-
-En los diagramas RTL se observa claramente la diferencia en hardware instanciado. La arquitectura uniciclo instancia los 8 multiplicadores y 7 sumadores de forma paralela y simultánea, por lo que consume la mayor cantidad de recursos tanto en CLBs como en DSPs. La arquitectura segmentada instancia la misma cantidad de operadores pero agrega registros de pipeline entre etapas, lo que incrementa ligeramente el uso de flip-flops pero permite operar a mayor frecuencia al reducir el camino crítico.
-
-La arquitectura multiciclo es la que menor cantidad de recursos consume porque reutiliza un único multiplicador y un único sumador en cada ciclo de reloj, cambiando únicamente los operandos mediante un multiplexor. Esto se relaciona directamente con las microarquitecturas de RISC-V: la arquitectura uniciclo de RISC-V instancia una ALU, una memoria de instrucciones y una memoria de datos que solo se usan una vez por instrucción, mientras que la multiciclo reutiliza esos mismos componentes en distintas fases de ejecución (fetch, decode, execute, memory, writeback), reduciendo el área de hardware a costa de mayor latencia.
-
----
-
-**3. ¿Cuándo se debe usar una microarquitectura u otra?**
-
-La elección de microarquitectura depende directamente del contexto de aplicación:
-
-Casos como: bajo consumo de potencia con alta duración de batería, computación y medicina.
-
-La arquitectura uniciclo es recomendada para diseños simples que no requieran de gran capacidad de manejo de instrucciones. 
-
-La multiciclo al ser la mas eficiente y pequeña es implementada en la industria medica en dispositivos medicos portatiles, estos son de bajo consumo energetico.
-
-El Pipeline es el mas grande y mas potente, se usa cuando se quiere el maximo rendimiento, ejecuta mas instrucciones por segundo, es usado en procesadores de computadora por ejemplo. 
-
----
-
-**4. ¿Qué tanto difiere el banco de registros implementado del banco de registros de un procesador?**
-
-En el banco de registros creado se estan sacando todos los valores de los registros de una sola vez, además solo se permite escribir pero no leer, no se contemplan problemas de escritura y lectura como en los procesadores que implementan unidad de riesgo para evitar ese tipo de problemas, se contemplan dos bancos de registros el x e y, en un procesador todo esta en un mismo banco. 
-
----
-
-**5. ¿Cuál microarquitectura ofrece el mejor balance entre rendimiento y consumo de recursos?**
-
-El Pipeline es el que ofrece mayor rendimiento, el Multiciclo es el mas eficiente, y el uniciclo ofrece algo de ambas, es rápido y no consume tanto como el Pipeline, pero solo ejecuta instruccion por instruccion. Lo mejor seria usar un Pipeline pero de cinco etapas ya que cuando son demasiado extendidos se vuelven enormes.
-
----
+Proyecto académico — EL3313 Taller de Diseño Digital, I Semestre 2026.  
+Instituto Tecnológico de Costa Rica.
