@@ -27,6 +27,7 @@ También realicé pruebas y simulaciones en vivado para ver como avanzaba el con
 ---
 
 # Simulación y banco de pruebas (Testbench)
+## 20/Abr/2026 - 30/Abr/2026
 
 Las pruebas de simulación se realizan con **Icarus Verilog** (`iverilog`) y su ejecutor `vvp`, herramientas libres disponibles para Linux.
 
