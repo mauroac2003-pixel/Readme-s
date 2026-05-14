@@ -8,7 +8,7 @@
 
 ---
 
-# Primer avance (Semana 9)
+# Primer avance 
 ## 8/Abr/2026 - 10/Abr/2026
 Se conversó entre los integrantes del grupo sobre el diagrama de bloques del proyecto y se investigó con ayuda de inteligencia artificial utilizando referencias de la web como apoyo para el funcionamiento del proyecto del reloj en VGA. Una vez realizada la investigación y se comprendió el flujo se optó por utilizar la pagina web Lucidchart.com para realizar la imagen del diagrama de flujo, la cual se presentó el día 10 de abril del 2026.
 
