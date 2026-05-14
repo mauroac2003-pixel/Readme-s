@@ -1,4 +1,4 @@
-# VGA Digital Clock FPGA **https://github.com/mauroac2003-pixel/vga-digital-clock-fpga*
+# VGA Digital Clock FPGA *https://github.com/mauroac2003-pixel/vga-digital-clock-fpga*
 
 ## Integrantes
 
