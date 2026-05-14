@@ -1,177 +1,276 @@
-# VGA Digital Clock — FPGA Nexys A7
+[README (2).md](https://github.com/user-attachments/files/27743116/README.2.md)
+# 🕐 Controlador VGA con Reloj Digital
 
-**Curso:** EL3313 — Taller de Diseño Digital  
-**Semestre:** I Semestre 2026  
-**Profesor:** Luis G. León-Vega, Ph.D  
-**Repositorio:** https://github.com/mauroac2003-pixel/vga-digital-clock-fpga
+> Implementación en FPGA de un reloj digital con salida VGA, desarrollado en Verilog para la tarjeta **Nexys A7 (Artix-7)**. Permite visualizar y ajustar horas, minutos y segundos en pantalla a través de botones y switches físicos.
 
 ---
 
-## Descripción
+## 📋 Tabla de Contenidos
 
-Sistema digital implementado en FPGA (Nexys A7-100T) que visualiza un reloj digital en una pantalla VGA a resolución 640×480 @ 60 Hz. El sistema muestra la hora en formato `HH:MM:SS` sobre una imagen de fondo personalizada y permite ajustar la hora mediante switches y botones de la tarjeta.
-
-El diseño está implementado en Verilog HDL con arquitectura modular jerárquica y sigue buenas prácticas de diseño digital adoptadas en academia e industria.
+- [Descripción General](#descripción-general)
+- [Diagrama de Bloques](#diagrama-de-bloques)
+- [Análisis de Timing](#análisis-de-timing)
+- [Consumo de Recursos](#consumo-de-recursos)
+- [Consumo de Potencia](#consumo-de-potencia)
+- [Requisitos](#requisitos)
+- [Instrucciones de Reproducción](#instrucciones-de-reproducción)
+- [Estructura del Proyecto](#estructura-del-proyecto)
 
 ---
 
-## Diagrama de bloques
+## 📖 Descripción General
+
+Este proyecto implementa un **reloj digital de tiempo real** que se visualiza mediante el protocolo VGA a una resolución de **640×480 @ 60 Hz**. El diseño está compuesto por módulos independientes que gestionan la sincronización VGA, la lógica del reloj, la memoria de video (VRAM), el generador de imagen, la fuente de caracteres numéricos (font ROM) y la decodificación para displays de 7 segmentos.
+
+Los displays de 7 segmentos de la tarjeta se utilizan como salida auxiliar para verificar el correcto funcionamiento del reloj y el control de hora en tiempo real.
+
+### Control de hora
+
+El modo de operación se selecciona mediante dos switches:
+
+| Switch J15 (RST) | Switch L16 | Switch M13 | Modo                        |
+|:----------------:|:----------:|:----------:|-----------------------------|
+| 1                | X          | X          | Reset → 00:00:00            |
+| 0                | 0          | 0          | Flujo normal (reloj corre)  |
+| 0                | 0          | 1          | Modificar **segundos**      |
+| 0                | 1          | 0          | Modificar **minutos**       |
+| 0                | 1          | 1          | Modificar **horas**         |
+
+Una vez seleccionado el campo a editar, se usan los botones:
+
+| Botón       | Pin  | Función       |
+|-------------|------|---------------|
+| BTNU        | M18  | Incrementar   |
+| BTND        | P18  | Decrementar   |
+
+---
+
+## 🧱 Diagrama de Bloques
 
 ```
-                        NEXYS A7 — top_reloj
-┌─────────────────────────────────────────────────────────────────────┐
-│                                                                     │
-│  clk (100MHz) ──┬──► clk_25MHz ──► clk_25_en ──► vga_sync         │
-│                 │                                    │              │
-│                 └──► clock_divider ──► clk_1hz       │hcount/vcount│
-│                                          │            │             │
-│  rst_sw ──► debouncer ──► rst_clean      │            ▼             │
-│  btn_up ──► debouncer ──► btn_up_clean   │         ┌──────┐        │
-│  btn_down ► debouncer ──► btn_down_clean │         │ VRAM │──────► RGB
-│                                          │         │(BRAM)│  pixel │
-│  sw[1:0] ──────────────────────────────►│         └──────┘  color │
-│                                          ▼            ▲             │
-│                                  control_hora_manual  │             │
-│                                    │  hh / mm / ss    │             │
-│                                    └──────────────►img_gen          │
-│                                                   (escribe VRAM)    │
-│                                    │                                │
-│                                    └──► display_7seg ──► seg / an   │
-│                                                                     │
-│  blink (~2Hz) ─────────────────────────►img_gen / display_7seg     │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-
-Salidas VGA:  hsync, vsync, vga_r[3:0], vga_g[3:0], vga_b[3:0]
-Salidas 7seg: seg[6:0], an[7:0]
+                         ┌──────────┐
+                         │  Clock   │
+                         │ (100 MHz)│
+                         └────┬─────┘
+                              │ 100 MHz
+                         ┌────▼──────┐
+                         │ Divisor   │──── 1 Hz ────────────────────────┐
+                         │   Clk     │                                  │
+                         └────┬──────┘                                  │
+                              │ 25 MHz (a todos los módulos inferiores)  │
+    ┌──────────┐              │                                          │
+    │ Botones  │         ┌────▼──────────────────────────────┐          │
+    │(BTNU/D)  │──────►  │                                   │          │
+    └──────────┘         │          Debouncer                │          │
+    ┌──────────┐         │                                   │          │
+    │ Switches │──────►  │                                   │          │
+    │(J15,L16, │         └───────────────┬───────────────────┘          │
+    │  M13)    │                         │ señales limpias               │
+    └──────────┘                         │                               │
+                                  ┌──────▼──────┐                        │
+           Reset ────────────────►│  Control    │◄───────────────────────┘
+                                  │  de hora    │ 1 Hz
+                                  └──────┬──────┘
+                                         │ Hora Actual (hh, mm, ss)
+                    Reset ──────────────►│
+                                  ┌──────▼──────┐   addr / pixel_data / we
+                                  │ Generador   ├─────────────────────────►┐
+                                  │ de imagen   │◄── font_rom (consulta)   │
+                                  └─────────────┘                          │
+                                                                            │
+                    ┌───────────────────────────────────────────────────────┤
+                    │                                                        │
+             ┌──────▼──────┐   addr (read)   ┌────────────────────┐        │
+             │    VRAM     │◄────────────────│  Controlador VGA   │        │
+             │ (Dual Port) │                 │ (HSYNC, VSYNC, RGB)│──► Pantalla
+             └──────┬──────┘  Pixel_data     └────────────────────┘
+                    └─────────────────────────────────────►(write)
 ```
+
+### Descripción de Módulos
+
+| Módulo                  | Instancia          | Función                                                        |
+|-------------------------|--------------------|----------------------------------------------------------------|
+| `debouncer`             | `db_up/down/rst/sw`| Elimina rebotes en botones y switches de control               |
+| `clock_divider`         | `div_1hz`          | Divide el reloj de 100 MHz a 1 Hz para el conteo del reloj    |
+| `clk_25MHz`             | `div_25`           | Genera el pixel clock de 25 MHz para VGA                      |
+| `control_hora_manual`   | `reloj`            | Lógica del reloj HH:MM:SS con control manual vía switches      |
+| `display_7seg`          | `disp`             | Codificación BCD a 7 segmentos (verificación en tarjeta)      |
+| `font_rom`              | —                  | ROM con los bitmaps de los dígitos 0–9 para renderizado VGA   |
+| `img_gen`               | `imagen`           | Genera los píxeles del reloj consultando font_rom y escribiendo en VRAM |
+| `vram`                  | `memoria`          | Memoria de video dual-port (BRAM) para el framebuffer         |
+| `vga_sync`              | `sync`             | Generación de señales Hsync, Vsync y coordenadas de píxel     |
 
 ---
 
-## Módulos del sistema
+## ⏱️ Análisis de Timing
 
-| Módulo | Archivo | Descripción |
-|--------|---------|-------------|
-| `top_reloj` | `rtl/top_reloj.v` | Módulo top — integra todos los subsistemas |
-| `vga_sync` | `rtl/vga_sync.v` | Generador de sincronización VGA 640×480@60Hz |
-| `vram` | `rtl/BRAM.v` | Memoria de video BRAM doble puerto (307200 píxeles × 12 bits) |
-| `img_gen` | `rtl/img_gen.v` | Generador de imagen — escribe fondo y dígitos en VRAM |
-| `font_rom` | `rtl/font_rom.v` | ROM de caracteres (dígitos 0-9 y ':') en formato 8×16 |
-| `clock_divider` | `rtl/clock_divider.v` | Divisor de 100 MHz a 1 Hz |
-| `clk_25MHz` | `rtl/clk_25MHz.v` | Generador de enable de 25 MHz para VGA |
-| `control_hora_manual` | `rtl/control_hora_manual.v` | Contador de tiempo con modo edición manual |
-| `debouncer` | `rtl/debouncer.v` | Módulo antirrebote para botones y reset |
-| `display_7seg` | `rtl/display_7seg.v` | Controlador de display 7 segmentos multiplexado (debug) |
+Reporte obtenido con **Vivado Timing Summary** tras la implementación (reloj de 100 MHz):
+
+### Setup
+
+| Métrica                        | Valor           |
+|-------------------------------|-----------------|
+| Worst Negative Slack (WNS)    | **-5.088 ns**   |
+| Total Negative Slack (TNS)    | -1827.970 ns    |
+| Endpoints fallidos            | 1423 / 4813     |
+
+### Hold
+
+| Métrica                        | Valor           |
+|-------------------------------|-----------------|
+| Worst Hold Slack (WHS)        | 0.067 ns ✅     |
+| Total Hold Slack (THS)        | 0.000 ns        |
+| Endpoints fallidos            | 0 / 4813        |
+
+### Pulse Width
+
+| Métrica                        | Valor           |
+|-------------------------------|-----------------|
+| Worst Pulse Width Slack (WPWS)| 4.500 ns ✅     |
+| Endpoints fallidos            | 0 / 522         |
+
+> El diseño presenta violaciones de timing en setup, lo que significa que algunas señales no alcanzan a estabilizarse a tiempo dentro del ciclo de reloj de 100 MHz. Hold y Pulse Width no tienen problemas. El proyecto funciona en la práctica, pero sería necesario optimizar el diseño para cumplir todos los requisitos de timing.
 
 ---
 
-## Estructura del repositorio
+## 📊 Consumo de Recursos
+
+Datos obtenidos del **Vivado Implementation Report** para la Nexys A7 (Artix-7 XC7A100T):
+
+| Módulo                    | Slice LUTs | Slice Registers | F7 Muxes | F8 Muxes | Block RAM | DSPs |
+|---------------------------|-----------|-----------------|----------|----------|-----------|------|
+| **top_reloj** (total)     | 42,922    | 281             | 9,459    | 842      | 120       | 2    |
+| `imagen` (img_gen)        | 42,617    | 105             | 9,457    | 842      | 1         | 0    |
+| `memoria` (vram)          | 126       | 8               | 0        | 0        | 120       | 0    |
+| `reloj` (control_hora)    | 59        | 20              | 2        | 0        | 0         | 0    |
+| `sync` (vga_sync)         | 23        | 22              | 0        | 0        | 0         | 0    |
+| `disp` (display_7seg)     | 13        | 17              | 0        | 0        | 0         | 0    |
+| `div_1hz` (clock_divider) | 21        | 28              | 0        | 0        | 0         | 0    |
+| `div_25` (clk_25MHz)      | 3         | 3               | 0        | 0        | 0         | 0    |
+| `db_*` (debouncers ×3)    | 13 c/u    | 17 c/u          | 0        | 0        | 0         | 0    |
+
+### Utilización respecto al dispositivo (XC7A100T)
+
+| Recurso          | Usado   | Disponible | Utilización |
+|------------------|---------|------------|-------------|
+| Slice LUTs       | 42,922  | 63,400     | **67.7 %**  |
+| Slice Registers  | 281     | 126,800    | **0.2 %**   |
+| F7 Muxes         | 9,459   | 31,700     | **29.8 %**  |
+| F8 Muxes         | 842     | 15,850     | **5.3 %**   |
+| Block RAM Tiles  | 120     | 135        | **88.9 %**  |
+| DSPs             | 2       | 240        | **< 1 %**   |
+| Bonded IOB       | 35      | 210        | **16.7 %**  |
+
+> ⚠️ El módulo `imagen` (img_gen) domina el uso de LUTs (~99 % del total). La BRAM está casi al límite debido al framebuffer en VRAM. El módulo `display_7seg` añade recursos adicionales al diseño al proveer una salida auxiliar de verificación.
+
+---
+
+## ⚡ Consumo de Potencia
+
+Análisis realizado con **Vivado Power Analysis** sobre el netlist implementado:
+
+| Componente        | Potencia  | Porcentaje |
+|-------------------|-----------|------------|
+| **Total On-Chip** | **0.56 W**| —          |
+| Dinámica total    | 0.456 W   | 81 %       |
+| → Logic           | 0.197 W   | 43 %       |
+| → Signals         | 0.192 W   | 42 %       |
+| → BRAM            | 0.049 W   | 11 %       |
+| → Clocks          | 0.009 W   | 2 %        |
+| → I/O             | 0.008 W   | 1 %        |
+| → DSP             | < 0.001 W | < 1 %      |
+| Device Static     | 0.104 W   | 19 %       |
+
+> 🌡️ Temperatura de juntura estimada: **27.6 °C** (ambiente 25 °C, θJA = 4.6 °C/W).  
+> Nivel de confianza del análisis: **Low** (sin vectores de simulación detallados).
+
+---
+
+## 🛠️ Requisitos
+
+### Hardware
+- Tarjeta **Nexys A7** (Artix-7 XC7A100T o XC7A50T)
+- Monitor con entrada **VGA**
+- Cable VGA
+- Cable USB para programación
+
+### Software
+- **Vivado Design Suite 2024.1** o superior
+
+---
+
+## 🚀 Instrucciones de Reproducción
+
+### 1. Clonar el repositorio
+
+```bash
+git clone https://github.com/tu-usuario/vga-reloj-digital.git
+cd vga-reloj-digital
+```
+
+### 2. Abrir el proyecto en Vivado
 
 ```
-vga-digital-clock-fpga/
-├── rtl/                        # Código HDL sintetizable
-│   ├── top_reloj.v             # Módulo top
-│   ├── vga_sync.v              # Controlador VGA
-│   ├── BRAM.v                  # Memoria de video (VRAM)
-│   ├── img_gen.v               # Generador de imagen
-│   ├── font_rom.v              # ROM de caracteres
-│   ├── clock_divider.v         # Divisor 100MHz → 1Hz
-│   ├── clk_25MHz.v             # Enable 25MHz para VGA
-│   ├── control_hora_manual.v   # Control de hora
-│   ├── debouncer.v             # Antirrebote
-│   ├── display_7seg.v          # Display 7 segmentos
-│   └── fondo_profe.coe         # Imagen de fondo (formato hex)
-├── sim/                        # Simulación y testbenches
-│   ├── tb_vga_sync.v
-│   ├── tb_vram.v
-│   ├── tb_img_gen.v
-│   ├── tb_font_rom.v
-│   ├── tb_clock_divider.v
-│   ├── tb_clk_25MHz.v
-│   ├── tb_control_hora_manual.v
-│   ├── tb_debouncer.v
-│   ├── tb_display_7seg.v
-│   ├── tb_top_reloj.v
-│   └── run_tests.sh            # Script de automatización de pruebas
+1. Abrir Vivado
+2. File → Open Project → seleccionar vga_reloj.xpr
+```
+
+### 3. Agregar fuentes (si es proyecto nuevo)
+
+```
+Project Manager → Add Sources → Add or Create Design Sources
+Agregar todos los archivos .v de la carpeta /src/
+Archivo top-level: top_reloj.v
+```
+
+### 4. Síntesis, implementación y programación
+
+```
+1. Flow Navigator → Run Synthesis
+2. Flow Navigator → Run Implementation
+3. Flow Navigator → Generate Bitstream
+4. Open Hardware Manager → Open Target → Auto Connect
+   → Program Device → seleccionar el .bit generado → Program
+```
+
+### 5. Verificar en pantalla
+
+Conectar el monitor VGA a la Nexys A7. Al programar correctamente se mostrará **00:00:00** en pantalla. Los displays de 7 segmentos de la tarjeta mostrarán la misma hora como verificación adicional.
+
+Para ajustar la hora, usar los switches y botones según la tabla de la sección [Control de hora](#control-de-hora).
+
+---
+
+## 📁 Estructura del Proyecto
+
+```
+vga-reloj-digital/
+├── src/
+│   ├── top_reloj.v           # Top-level
+│   ├── vga_sync.v            # Sincronización VGA
+│   ├── img_gen.v             # Generador de imagen
+│   ├── font_rom.v            # ROM de bitmaps de dígitos 0–9
+│   ├── vram.v                # Memoria de video dual-port (BRAM)
+│   ├── control_hora_manual.v # Lógica del reloj con control manual
+│   ├── clock_divider.v       # Divisor 100 MHz → 1 Hz
+│   ├── clk_25MHz.v           # Divisor 100 MHz → 25 MHz
+│   ├── display_7seg.v        # Decodificador BCD a 7 segmentos
+│   └── debouncer.v           # Debouncer para botones y switches
 ├── constraints/
-│   └── artix7.xdc              # Constraints para Nexys A7-100T
-├── .gitignore
+│   └── nexys_a7.xdc          # Constraints de pines
+├── sim/
+│   ├── tb_top_reloj.v         # Testbench top-level
+│   ├── tb_vga_sync.v          # Testbench sincronización VGA
+│   ├── tb_img_gen.v           # Testbench generador de imagen
+│   ├── tb_font_rom.v          # Testbench ROM de caracteres
+│   ├── tb_vram.v              # Testbench memoria de video
+│   ├── tb_control_hora.v      # Testbench lógica del reloj
+│   ├── tb_clock_divider.v     # Testbench divisor 1 Hz
+│   ├── tb_clk_25MHz.v         # Testbench divisor 25 MHz
+│   ├── tb_display_7seg.v      # Testbench decodificador 7 segmentos
+│   └── tb_debouncer.v         # Testbench debouncer
 └── README.md
 ```
 
----
 
-## Uso de la tarjeta
-
-| Entrada | Descripción |
-|---------|-------------|
-| `SW0` | Reset del sistema |
-| `SW1` | Modo edición: `00`=automático, `01`=editar segundos |
-| `SW2` | Modo edición: `10`=editar minutos, `11`=editar horas |
-| `BTNU` | Incrementar valor en modo edición |
-| `BTND` | Decrementar valor en modo edición |
-
----
-
-## Dependencias y herramientas
-
-- **Vivado Design Suite** 2024.x — síntesis e implementación
-- **Icarus Verilog (iverilog)** — simulación de testbenches
-- **Tarjeta FPGA:** Nexys A7-100T (Artix-7 XC7A100T)
-- **Monitor VGA** con resolución mínima 640×480
-
----
-
-## Simulación de testbenches
-
-### Requisitos
-
-```bash
-sudo apt install iverilog
-```
-
-### Ejecutar todas las pruebas
-
-```bash
-cd sim/
-chmod +x run_tests.sh
-./run_tests.sh
-```
-
-### Ejecutar un testbench individual
-
-```bash
-cd sim/
-iverilog -o out/tb_vga_sync.out ../rtl/vga_sync.v tb_vga_sync.v
-vvp out/tb_vga_sync.out
-```
-
----
-
-## Flujo GitFlow
-
-```
-feature/vga_digital_clock ──┐
-                             ├──► develop ──► main (v1.0.0)
-feature/testbenches ─────────┤
-feature/vga_functional ──────┘
-```
-
-- `main` — versión estable de producción (entrega final, tag `v1.0.0`)
-- `develop` — integración del desarrollo
-- `feature/*` — desarrollo de funcionalidades individuales
-
----
-
-## Integrantes
-
-- Arce Cruz Josué
-- Navarro Acuña Mauro Agustín
-- Arguedas Guzmán Gabriel
-
----
-
-## Licencia
-
-Proyecto académico — EL3313 Taller de Diseño Digital, I Semestre 2026.  
-Instituto Tecnológico de Costa Rica.
